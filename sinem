@@ -1,0 +1,204 @@
+import streamlit as st
+from openai import OpenAI
+from dotenv import load_dotenv
+import os
+import tempfile
+from moviepy.editor import VideoFileClip
+
+# Load environment variables
+load_dotenv()
+
+# Initialize OpenAI client
+client = OpenAI()
+
+# Set page config
+st.set_page_config(page_title="Friendly Video Translator", page_icon="🎥", layout="wide")
+
+# Custom CSS to make the app romantic
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Dancing+Script&display=swap');
+
+    .stApp {
+        background-color: #fff0f5;  /* LavenderBlush */
+        color: #c71585;  /* MediumVioletRed */
+    }
+    .stButton>button {
+        background-color: #ff69b4;  /* HotPink */
+        color: white;
+        border-radius: 20px;
+        font-family: 'Dancing Script', cursive;
+        font-size: 18px;
+    }
+    .stSelectbox>div>div {
+        background-color: #ffe4e1;  /* MistyRose */
+        color: #c71585;  /* MediumVioletRed */
+    }
+    .stTextArea>div>div>textarea {
+        background-color: #ffe4e1;  /* MistyRose */
+        color: #c71585;  /* MediumVioletRed */
+    }
+    h1, h2, h3 {
+        font-family: 'Dancing Script', cursive;
+        color: #ff1493 !important;  /* DeepPink */
+    }
+    p, .stMarkdown, .stText {
+        color: #c71585 !important;  /* MediumVioletRed */
+    }
+    .stProgress > div > div > div > div {
+        background-color: #ff69b4;  /* HotPink */
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Streamlit app
+st.title("💖 Love Language Translator")
+st.write("Welcome, dear! Let's translate your heartfelt message across languages. 💕")
+
+# File uploader
+video_file = st.file_uploader("💌 Upload your love-filled video", type=["mp4", "avi", "mov"])
+
+# Language selection
+language = st.selectbox("💞 Choose the language of love:", ["Italian", "Spanish", "Turkish", "English"])
+
+# Function to save uploaded file temporarily
+def save_uploaded_file(uploaded_file):
+    if uploaded_file is not None:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            return tmp_file.name
+    return None
+
+# Function to convert video to audio using ffmpeg
+def video_to_audio(video_path):
+    audio_path = os.path.splitext(video_path)[0] + ".mp3"
+    video = VideoFileClip(video_path)
+    video.audio.write_audiofile(audio_path, codec='mp3')
+    return audio_path
+
+# Function to save text to file
+def save_to_file(content, filename):
+    with open(filename, 'w', encoding='utf-8') as file:
+        file.write(content)
+    return filename
+
+# Function to convert transcription to SRT format
+
+def save_to_srt(transcription, filename):
+    lines = transcription.split("\n")
+
+    # Create SRT formatted text
+    srt_content = ""
+    counter = 1  # Subtitle counter
+    start_time = 0  # Initialize start time
+
+    for line in lines:
+        if line.strip():  # Only process non-empty lines
+            end_time = start_time + 5  # Assuming 5 seconds per subtitle (adjust as needed)
+
+            # Convert start and end times to hh:mm:ss,ms format
+            start_time_str = f"00:{start_time // 60:02}:{start_time % 60:02},000"
+            end_time_str = f"00:{end_time // 60:02}:{end_time % 60:02},000"
+
+            # Append the formatted subtitle to the SRT content
+            srt_content += f"{counter}\n{start_time_str} --> {end_time_str}\n{line.strip()}\n\n"
+
+            # Update counter and start time for the next subtitle
+            counter += 1
+            start_time = end_time
+
+    # Save the .srt file with utf-8 encoding
+    with open(filename, 'w', encoding='utf-8') as file:
+        file.write(srt_content)
+
+    return filename
+
+# Process button
+if st.button("💘 Translate with Love") and video_file is not None:
+    with st.spinner("💫 Sprinkling love dust on your video... Just a moment!"):
+        try:
+            # Save uploaded file
+            temp_video_path = save_uploaded_file(video_file)
+
+            # Convert video to audio
+            temp_audio_path = video_to_audio(temp_video_path)
+
+            # Transcribe audio
+            with open(temp_audio_path, "rb") as audio_file:
+                transcription = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    response_format="text"
+                )
+
+            st.success("🎉 Your message of love has been transcribed!")
+
+            # Display transcription
+            st.subheader("💌 Your Original Love Note")
+            st.text_area("Heartfelt Words", transcription, height=200)
+
+            # Save transcription to .srt file
+            transcription_srt_file = save_to_srt(transcription, "transcription.srt")
+            st.download_button(
+                label="📥 Download Transcription (.srt)",
+                data=open(transcription_srt_file, "r", encoding="utf-8").read(),
+                file_name="transcription.srt",
+                mime="application/x-subrip"
+            )
+
+            # Translate transcription to all languages
+            languages = ["Italian", "Spanish", "Turkish", "English"]
+            translations = {}
+
+            progress_bar = st.progress(0)
+            for i, lang in enumerate(languages):
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "You are a friendly and accurate translator."},
+                        {"role": "user",
+                         "content": f"Please translate this text to {lang} in a friendly tone:\n\n{transcription}"}
+                    ]
+                )
+                translations[lang] = response.choices[0].message.content
+                progress_bar.progress((i + 1) / len(languages))
+
+            st.success("🌈 Your love has been translated!")
+
+            # Display and allow download of all translations in .srt format
+            st.write("Here are your love translations! Feel the romance in every language.")
+            for lang, translated_text in translations.items():
+                with st.expander(f"💖 {lang} Love Translation"):
+                    st.text_area(f"{lang} Romantic Words", translated_text, height=150)
+
+                    # Save translation to .srt file
+                    translation_srt_file = save_to_srt(translated_text, f"translation_{lang.lower()}.srt")
+                    st.download_button(
+                        label=f"💕 Download {lang} Love Letter (.srt)",
+                        data=open(translation_srt_file, "r", encoding="utf-8").read(),
+                        file_name=f"translation_{lang.lower()}.srt",
+                        mime="application/x-subrip"
+                    )
+
+            # Clean up temporary files
+            os.unlink(temp_video_path)
+            os.unlink(temp_audio_path)
+
+        except Exception as e:
+            st.error(f"Oh no! Our love connection hit a snag: {str(e)}")
+
+# Instructions
+st.sidebar.header("💘 How to Spread Love")
+st.sidebar.markdown("""
+1. 💌 Upload your love-filled video (mp4, avi, or mov).
+2. 💞 Choose your favorite language of love.
+3. 💘 Click 'Translate with Love'.
+4. 🌈 Feel the romance in all four languages.
+5. 💕 Download your multilingual love letters!
+
+Spread love across languages! 😘
+""")
+
+# Footer
+st.markdown("---")
+st.markdown("Crafted with 💖 by Your Romantic Language Enthusiasts")
